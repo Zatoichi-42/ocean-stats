@@ -147,59 +147,48 @@ class HashrateDataScraper:
     def parse_workers_data(self, soup):
         """
         Parse workers data from HTML soup
-        Returns dictionary with worker names as keys and hashrate values
+        Returns dictionary with worker names as keys and their data as values
         """
         print("Parsing workers data...")
 
         workers_data = {}
+        target_workers = ['a-q-1', 'a-q-2', 'a-ns3-1']
 
         try:
-            # Look for Workers section
-            workers_section = soup.find(string=re.compile(r'Workers', re.IGNORECASE))
-            if not workers_section:
-                print("Workers section not found")
-                return None
+            # Look for table rows containing worker data
+            rows = soup.find_all('tr')
+            print(f"Found {len(rows)} table rows for workers")
 
-            print("Workers section found, looking for worker data...")
+            for i, row in enumerate(rows):
+                cells = row.find_all(['td', 'th'])
+                if len(cells) >= 5:  # Nickname, Status, Last Share, Hashrate(60s), Hashrate(3hr), Earnings
+                    nickname = cells[0].get_text(strip=True)
+                    status = cells[1].get_text(strip=True)
+                    last_share = cells[2].get_text(strip=True)
+                    hashrate_60s = cells[3].get_text(strip=True)
+                    hashrate_3hr = cells[4].get_text(strip=True)
+                    earnings = cells[5].get_text(strip=True) if len(cells) > 5 else "0"
 
-            # Find parent element and search for worker table/list
-            parent = workers_section.parent
-            for _ in range(5):  # Search up to 5 parent levels
-                if parent:
-                    # Look for tables or divs containing worker data
-                    tables = parent.find_all('table')
-                    for table in tables:
-                        rows = table.find_all('tr')
-                        for row in rows:
-                            cells = row.find_all(['td', 'th'])
-                            if len(cells) >= 3:  # Worker name, status, hashrate
-                                worker_name = cells[0].get_text(strip=True)
-                                status = cells[1].get_text(strip=True)
-                                hashrate_text = cells[2].get_text(strip=True)
+                    print(f"Row {i}: Worker='{nickname}', Status='{status}'")
 
-                                print(f"Worker: '{worker_name}', Status: '{status}', Hashrate: '{hashrate_text}'")
+                    # Only collect data for target workers
+                    if nickname in target_workers:
+                        # Extract numeric values
+                        hashrate_60s_val = self.extract_numeric(hashrate_60s)
+                        hashrate_3hr_val = self.extract_numeric(hashrate_3hr)
+                        earnings_val = self.extract_earnings(earnings)
 
-                                # Only include online workers
-                                if 'online' in status.lower() and worker_name.lower() != 'total':
-                                    hashrate_match = re.search(r'(\d+\.?\d*)', hashrate_text)
-                                    if hashrate_match:
-                                        hashrate_value = float(hashrate_match.group(1))
-                                        workers_data[worker_name] = hashrate_value
-                                        print(f"PARSED WORKER: {worker_name} -> {hashrate_value} Th/s")
+                        workers_data[nickname] = {
+                            'last_share': last_share,
+                            'status': status,
+                            'hashrate_60s': hashrate_60s_val,
+                            'hashrate_3hr': hashrate_3hr_val,
+                            'earnings': earnings_val
+                        }
 
-                                # Capture Total separately
-                                if worker_name.lower() == 'total':
-                                    hashrate_match = re.search(r'(\d+\.?\d*)', hashrate_text)
-                                    if hashrate_match:
-                                        total_value = float(hashrate_match.group(1))
-                                        workers_data['Total'] = total_value
-                                        print(f"PARSED TOTAL: {total_value} Th/s")
+                        print(f"COLLECTED: {nickname} -> {workers_data[nickname]}")
 
-                    parent = parent.parent if parent else None
-                else:
-                    break
-
-            print(f"Total workers parsed: {len(workers_data)}")
+            print(f"Total target workers found: {len(workers_data)}")
             return workers_data if workers_data else None
 
         except Exception as e:
@@ -207,11 +196,133 @@ class HashrateDataScraper:
             print(f"ERROR: Exception type: {type(e).__name__}")
             return None
 
+    def extract_numeric(self, text):
+        """Extract numeric value from text and convert to Th/s"""
+        match = re.search(r'(\d+\.?\d*)', text)
+        if match:
+            value = float(match.group(1))
+            # Convert based on unit suffix
+            if 'Gh/s' in text or 'GH/s' in text:
+                return value / 1000  # Convert GH/s to TH/s
+            elif 'Th/s' in text or 'TH/s' in text:
+                return value
+            elif 'Ph/s' in text or 'PH/s' in text:
+                return value * 1000  # Convert PH/s to TH/s
+            else:
+                return value  # Assume TH/s if no unit
+        return 0.0
+
+    def extract_earnings(self, text):
+        """Extract earnings value and format as decimal"""
+        match = re.search(r'(\d+\.?\d*(?:[eE][+-]?\d+)?)', text)
+        if match:
+            value = float(match.group(1))
+            return f"{value:.8f}"  # Format to 8 decimal places
+        return "0.00000000"
+
     def close(self):
         """Close the browser driver"""
         if self.driver:
             self.driver.quit()
             print("Browser driver closed")
+
+
+class WorkerCSVManager:
+    """
+    Handles CSV file operations for individual worker hashrate data
+    """
+
+    def __init__(self, worker_name):
+        """Initialize worker CSV manager"""
+        self.worker_name = worker_name
+        self.filename = f"{worker_name}_hashrate_data.csv"
+        self.columns = ["id", "last_share", "status", "hashrate_60s", "hashrate_3hr", "earnings"]
+        print(f"Worker CSV Manager initialized for {worker_name}: {self.filename}")
+
+    def initialize_csv(self):
+        """Create CSV file with headers if it doesn't exist"""
+        if not os.path.exists(self.filename):
+            print(f"Creating new worker CSV file: {self.filename}")
+            df = pd.DataFrame(columns=self.columns)
+            df.to_csv(self.filename, index=False)
+            print(f"Worker CSV created: {self.filename}")
+        else:
+            print(f"Worker CSV exists: {self.filename}")
+
+    def get_next_id(self):
+        """Get the next ID for the worker CSV record"""
+        try:
+            if os.path.exists(self.filename):
+                df = pd.read_csv(self.filename)
+                if len(df) > 0:
+                    last_id = df['id'].max()
+                    return last_id + 1
+                else:
+                    return 0
+            else:
+                return 0
+        except Exception as e:
+            print(f"ERROR: Failed to get next ID for {self.worker_name}: {e}")
+            return 0
+
+    def append_data(self, worker_data):
+        """Append worker data to CSV"""
+        print(f"Appending data for worker {self.worker_name}...")
+
+        # Get next ID
+        next_id = self.get_next_id()
+
+        # Create row data
+        row_data = {
+            "id": next_id,
+            "last_share": worker_data['last_share'],
+            "status": worker_data['status'],
+            "hashrate_60s": worker_data['hashrate_60s'],
+            "hashrate_3hr": worker_data['hashrate_3hr'],
+            "earnings": worker_data['earnings']
+        }
+
+        print(f"Worker {self.worker_name} data: {row_data}")
+
+        try:
+            df = pd.DataFrame([row_data])
+            df.to_csv(self.filename, mode='a', header=False, index=False)
+            print(f"Data appended for worker {self.worker_name}")
+        except Exception as e:
+            print(f"ERROR: Failed to append data for {self.worker_name}: {e}")
+
+
+class WorkersManager:
+    """
+    Manages multiple individual worker CSV files
+    """
+
+    def __init__(self, target_workers=['a-q-1', 'a-q-2', 'a-ns3-1']):
+        """Initialize managers for target workers"""
+        self.target_workers = target_workers
+        self.worker_managers = {}
+
+        for worker in target_workers:
+            self.worker_managers[worker] = WorkerCSVManager(worker)
+
+        print(f"Workers Manager initialized for: {target_workers}")
+
+    def initialize_all_csvs(self):
+        """Initialize all worker CSV files"""
+        for worker, manager in self.worker_managers.items():
+            manager.initialize_csv()
+
+    def append_workers_data(self, workers_data):
+        """Append data for all workers that have data"""
+        if not workers_data:
+            print("No workers data to append")
+            return
+
+        for worker_name, worker_data in workers_data.items():
+            if worker_name in self.worker_managers:
+                self.worker_managers[worker_name].append_data(worker_data)
+            else:
+                print(f"Skipping unknown worker: {worker_name}")
 
 
 class CSVManager:
@@ -246,15 +357,12 @@ class CSVManager:
             else:
                 print("CSV file already has id column")
 
-            # Check if normalized_timestamp column exists
-            if 'normalized_timestamp' not in df.columns:
-                print("Adding normalized_timestamp column to existing CSV...")
-                # Add normalized_timestamp column (will be filled with new format going forward)
-                df.insert(2, 'normalized_timestamp', None)
+            # Remove old normalized_timestamp column if it exists
+            if 'normalized_timestamp' in df.columns:
+                print("Removing old normalized_timestamp column...")
+                df = df.drop('normalized_timestamp', axis=1)
                 df.to_csv(self.filename, index=False)
-                print("Added normalized_timestamp column")
-            else:
-                print("CSV file already has normalized_timestamp column")
+                print("Removed normalized_timestamp column")
 
     def get_next_id(self):
         """Get the next ID for the CSV record"""
@@ -327,147 +435,17 @@ class CSVManager:
             return None
 
 
-class WorkersCSVManager:
-    """
-    Handles CSV file operations for storing workers hashrate data
-    """
-
-    def __init__(self, filename="workers_hashrate_data.csv"):
-        """Initialize workers CSV manager with filename"""
-        self.filename = filename
-        self.worker_columns = set()  # Dynamic worker columns
-        print(f"Workers CSV Manager initialized with file: {filename}")
-
-    def get_worker_columns(self):
-        """Get current worker columns from existing CSV"""
-        try:
-            if os.path.exists(self.filename):
-                df = pd.read_csv(self.filename)
-                # Get all columns except id and timestamp
-                worker_cols = [col for col in df.columns if col not in ['id', 'timestamp']]
-                self.worker_columns = set(worker_cols)
-                print(f"Existing worker columns: {worker_cols}")
-                return worker_cols
-            else:
-                return []
-        except Exception as e:
-            print(f"ERROR: Failed to get worker columns: {e}")
-            return []
-
-    def initialize_workers_csv(self, initial_workers=None):
-        """Create or update workers CSV file"""
-        if not os.path.exists(self.filename):
-            print("Creating new workers CSV file...")
-            if initial_workers:
-                worker_names = [name for name in initial_workers.keys() if name != 'Total']
-                columns = ['id', 'timestamp'] + sorted(worker_names) + ['Total']
-            else:
-                columns = ['id', 'timestamp', 'Total']
-
-            df = pd.DataFrame(columns=columns)
-            df.to_csv(self.filename, index=False)
-            self.worker_columns = set(columns[2:])  # Exclude id and timestamp
-            print(f"Workers CSV created with columns: {columns}")
-        else:
-            print("Workers CSV file exists")
-            self.get_worker_columns()
-
-    def get_next_workers_id(self):
-        """Get the next ID for the workers CSV record"""
-        try:
-            if os.path.exists(self.filename):
-                df = pd.read_csv(self.filename)
-                if len(df) > 0:
-                    last_id = df['id'].max()
-                    next_id = last_id + 1
-                    print(f"Next workers ID: {next_id}")
-                    return next_id
-                else:
-                    return 0
-            else:
-                return 0
-        except Exception as e:
-            print(f"ERROR: Failed to get next workers ID: {e}")
-            return 0
-
-    def append_workers_data(self, workers_data):
-        """Append workers data to CSV"""
-        print("Appending workers data to CSV...")
-
-        if not workers_data:
-            print("No workers data to append")
-            return
-
-        # Get next ID
-        next_id = self.get_next_workers_id()
-
-        # Create timestamp
-        timestamp = datetime.datetime.now().strftime("%m/%d %H:%M:%S")
-
-        # Get current columns and new workers
-        current_workers = self.get_worker_columns()
-        new_workers = set(workers_data.keys()) - self.worker_columns
-
-        # If new workers found, update CSV structure
-        if new_workers:
-            print(f"New workers detected: {new_workers}")
-            self.add_new_worker_columns(new_workers)
-            current_workers = self.get_worker_columns()
-
-        # Create row data
-        row_data = {'id': next_id, 'timestamp': timestamp}
-
-        # Add data for all known workers
-        for worker in current_workers:
-            row_data[worker] = workers_data.get(worker, None)
-
-        print(f"Workers row data: {row_data}")
-
-        try:
-            df = pd.DataFrame([row_data])
-            df.to_csv(self.filename, mode='a', header=False, index=False)
-            print("Workers data successfully appended")
-        except Exception as e:
-            print(f"ERROR: Failed to append workers data: {e}")
-
-    def add_new_worker_columns(self, new_workers):
-        """Add new worker columns to existing CSV"""
-        try:
-            df = pd.read_csv(self.filename)
-
-            # Add new columns with None values
-            for worker in new_workers:
-                df[worker] = None
-
-            # Reorder columns: id, timestamp, sorted workers, Total at end
-            worker_cols = [col for col in df.columns if col not in ['id', 'timestamp']]
-            if 'Total' in worker_cols:
-                worker_cols.remove('Total')
-                worker_cols = sorted(worker_cols) + ['Total']
-            else:
-                worker_cols = sorted(worker_cols)
-
-            df = df[['id', 'timestamp'] + worker_cols]
-            df.to_csv(self.filename, index=False)
-
-            self.worker_columns.update(new_workers)
-            print(f"Added new worker columns: {new_workers}")
-
-        except Exception as e:
-            print(f"ERROR: Failed to add new worker columns: {e}")
-
-
 class HashrateMonitor:
     """
     Main class to coordinate scraping and data storage
     """
 
-    def __init__(self, url, csv_filename="hashrate_data.csv", workers_csv_filename="workers_hashrate_data.csv"):
-        """Initialize monitor with URL and CSV filenames"""
+    def __init__(self, url, csv_filename="hashrate_data.csv"):
+        """Initialize monitor with URL and CSV filename"""
         self.url = url
         self.scraper = HashrateDataScraper(url)
         self.csv_manager = CSVManager(csv_filename)
-        self.workers_csv_manager = WorkersCSVManager(workers_csv_filename)
+        self.workers_manager = WorkersManager()
         print("Hashrate Monitor initialized")
 
     def run_once(self):
@@ -491,8 +469,8 @@ class HashrateMonitor:
 
         if workers_data:
             print(f"Successfully collected {len(workers_data)} worker values")
-            # Store workers data in CSV
-            self.workers_csv_manager.append_workers_data(workers_data)
+            # Store workers data in individual CSV files
+            self.workers_manager.append_workers_data(workers_data)
             success = True
         else:
             print("ERROR: Failed to collect workers data")
@@ -514,7 +492,7 @@ class HashrateMonitor:
 
         # Initialize CSV files
         self.csv_manager.initialize_csv()
-        self.workers_csv_manager.initialize_workers_csv()
+        self.workers_manager.initialize_all_csvs()
 
         cycle_count = 0
         success_count = 0
@@ -565,10 +543,9 @@ def main():
     # Configuration
     url = "https://ocean.xyz/stats/bc1qf6kklyuzuq7sg9dw8duqr7uu5xhl07xvvny4dk"
     csv_filename = "hashrate_data.csv"
-    workers_csv_filename = "workers_hashrate_data.csv"
 
     # Create monitor instance
-    monitor = HashrateMonitor(url, csv_filename, workers_csv_filename)
+    monitor = HashrateMonitor(url, csv_filename)
 
     print("\nStarting continuous monitoring mode (every 1 minute)...")
     print("This will append data to CSV file with timestamp format: mm/dd hr:m:s")
