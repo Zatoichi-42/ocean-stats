@@ -54,14 +54,14 @@ class HashrateDataScraper:
     def fetch_data(self):
         """
         Fetch hashrate data from the website
-        Returns dictionary with hashrate values or None if failed
+        Returns tuple (hashrate_data, workers_data) or (None, None) if failed
         """
         print("Fetching data from website...")
 
         if not self.driver:
             if not self.setup_driver():
                 print("ERROR: Failed to setup driver")
-                return None
+                return None, None
 
         try:
             # Load the page
@@ -81,20 +81,26 @@ class HashrateDataScraper:
             print("Parsing page content...")
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
 
-            # Find the hashrate table
+            # Find the hashrate table and workers data
             hashrate_data = self.parse_hashrate_table(soup)
+            workers_data = self.parse_workers_data(soup)
 
             if hashrate_data:
-                print("Data fetched successfully")
-                return hashrate_data
+                print("Hashrate data fetched successfully")
             else:
                 print("ERROR: Failed to parse hashrate data")
-                return None
+
+            if workers_data:
+                print("Workers data fetched successfully")
+            else:
+                print("ERROR: Failed to parse workers data")
+
+            return hashrate_data, workers_data
 
         except Exception as e:
             print(f"ERROR: Exception during data fetch: {e}")
             print(f"ERROR: Exception type: {type(e).__name__}")
-            return None
+            return None, None
 
     def parse_hashrate_table(self, soup):
         """
@@ -138,6 +144,69 @@ class HashrateDataScraper:
             print(f"ERROR: Exception type: {type(e).__name__}")
             return None
 
+    def parse_workers_data(self, soup):
+        """
+        Parse workers data from HTML soup
+        Returns dictionary with worker names as keys and hashrate values
+        """
+        print("Parsing workers data...")
+
+        workers_data = {}
+
+        try:
+            # Look for Workers section
+            workers_section = soup.find(text=re.compile(r'Workers', re.IGNORECASE))
+            if not workers_section:
+                print("Workers section not found")
+                return None
+
+            print("Workers section found, looking for worker data...")
+
+            # Find parent element and search for worker table/list
+            parent = workers_section.parent
+            for _ in range(5):  # Search up to 5 parent levels
+                if parent:
+                    # Look for tables or divs containing worker data
+                    tables = parent.find_all('table')
+                    for table in tables:
+                        rows = table.find_all('tr')
+                        for row in rows:
+                            cells = row.find_all(['td', 'th'])
+                            if len(cells) >= 3:  # Worker name, status, hashrate
+                                worker_name = cells[0].get_text(strip=True)
+                                status = cells[1].get_text(strip=True)
+                                hashrate_text = cells[2].get_text(strip=True)
+
+                                print(f"Worker: '{worker_name}', Status: '{status}', Hashrate: '{hashrate_text}'")
+
+                                # Only include online workers
+                                if 'online' in status.lower() and worker_name.lower() != 'total':
+                                    hashrate_match = re.search(r'(\d+\.?\d*)', hashrate_text)
+                                    if hashrate_match:
+                                        hashrate_value = float(hashrate_match.group(1))
+                                        workers_data[worker_name] = hashrate_value
+                                        print(f"PARSED WORKER: {worker_name} -> {hashrate_value} Th/s")
+
+                                # Capture Total separately
+                                if worker_name.lower() == 'total':
+                                    hashrate_match = re.search(r'(\d+\.?\d*)', hashrate_text)
+                                    if hashrate_match:
+                                        total_value = float(hashrate_match.group(1))
+                                        workers_data['Total'] = total_value
+                                        print(f"PARSED TOTAL: {total_value} Th/s")
+
+                    parent = parent.parent if parent else None
+                else:
+                    break
+
+            print(f"Total workers parsed: {len(workers_data)}")
+            return workers_data if workers_data else None
+
+        except Exception as e:
+            print(f"ERROR: Exception during workers parsing: {e}")
+            print(f"ERROR: Exception type: {type(e).__name__}")
+            return None
+
     def close(self):
         """Close the browser driver"""
         if self.driver:
@@ -153,18 +222,59 @@ class CSVManager:
     def __init__(self, filename="hashrate_data.csv"):
         """Initialize CSV manager with filename"""
         self.filename = filename
-        self.columns = ["timestamp", "24_hrs", "3_hrs", "10_min", "5_min", "60_sec"]
+        self.columns = ["id", "timestamp", "24_hrs", "3_hrs", "10_min", "5_min", "60_sec"]
         print(f"CSV Manager initialized with file: {filename}")
 
     def initialize_csv(self):
-        """Create CSV file with headers if it doesn't exist"""
+        """Create CSV file with headers if it doesn't exist or update existing file"""
         if not os.path.exists(self.filename):
             print("Creating new CSV file with headers...")
             df = pd.DataFrame(columns=self.columns)
             df.to_csv(self.filename, index=False)
             print("CSV file created successfully")
         else:
-            print("CSV file already exists")
+            print("CSV file exists, checking for id column...")
+            df = pd.read_csv(self.filename)
+
+            # Check if id column exists
+            if 'id' not in df.columns:
+                print("Adding id column to existing CSV...")
+                # Add id column starting from 0
+                df.insert(0, 'id', range(len(df)))
+                df.to_csv(self.filename, index=False)
+                print(f"Added id column to {len(df)} existing records")
+            else:
+                print("CSV file already has id column")
+
+            # Check if normalized_timestamp column exists
+            if 'normalized_timestamp' not in df.columns:
+                print("Adding normalized_timestamp column to existing CSV...")
+                # Add normalized_timestamp column (will be filled with new format going forward)
+                df.insert(2, 'normalized_timestamp', None)
+                df.to_csv(self.filename, index=False)
+                print("Added normalized_timestamp column")
+            else:
+                print("CSV file already has normalized_timestamp column")
+
+    def get_next_id(self):
+        """Get the next ID for the CSV record"""
+        try:
+            if os.path.exists(self.filename):
+                df = pd.read_csv(self.filename)
+                if len(df) > 0:
+                    last_id = df['id'].max()
+                    next_id = last_id + 1
+                    print(f"Next ID: {next_id}")
+                    return next_id
+                else:
+                    print("Empty CSV file, starting with ID 0")
+                    return 0
+            else:
+                print("CSV file doesn't exist, starting with ID 0")
+                return 0
+        except Exception as e:
+            print(f"ERROR: Failed to get next ID: {e}")
+            return 0
 
     def append_data(self, hashrate_data):
         """
@@ -173,12 +283,19 @@ class CSVManager:
         """
         print("Appending data to CSV...")
 
-        # Create timestamp in mm/dd hr:m:s format
-        timestamp = datetime.datetime.now().strftime("%m/%d %H:%M:%S")
+        # Get next ID
+        next_id = self.get_next_id()
+
+        # Create timestamps
+        now = datetime.datetime.now()
+        timestamp = now.strftime("%m/%d %H:%M:%S")
+
+        print(f"ID: {next_id}")
         print(f"Timestamp: {timestamp}")
 
         # Create row data with None as default for missing values
         row_data = {
+            "id": next_id,
             "timestamp": timestamp,
             "24_hrs": hashrate_data.get("24 hrs", None),
             "3_hrs": hashrate_data.get("3 hrs", None),
@@ -215,11 +332,12 @@ class HashrateMonitor:
     Main class to coordinate scraping and data storage
     """
 
-    def __init__(self, url, csv_filename="hashrate_data.csv"):
-        """Initialize monitor with URL and CSV filename"""
+    def __init__(self, url, csv_filename="hashrate_data.csv", workers_csv_filename="workers_hashrate_data.csv"):
+        """Initialize monitor with URL and CSV filenames"""
         self.url = url
         self.scraper = HashrateDataScraper(url)
         self.csv_manager = CSVManager(csv_filename)
+        self.workers_csv_manager = WorkersCSVManager(workers_csv_filename)
         print("Hashrate Monitor initialized")
 
     def run_once(self):
@@ -229,17 +347,32 @@ class HashrateMonitor:
         print("=" * 50)
 
         # Fetch data from website
-        hashrate_data = self.scraper.fetch_data()
+        hashrate_data, workers_data = self.scraper.fetch_data()
+
+        success = False
 
         if hashrate_data:
             print(f"Successfully collected {len(hashrate_data)} hashrate values")
-            # Store data in CSV
+            # Store hashrate data in CSV
             self.csv_manager.append_data(hashrate_data)
+            success = True
+        else:
+            print("ERROR: Failed to collect hashrate data")
+
+        if workers_data:
+            print(f"Successfully collected {len(workers_data)} worker values")
+            # Store workers data in CSV
+            self.workers_csv_manager.append_workers_data(workers_data)
+            success = True
+        else:
+            print("ERROR: Failed to collect workers data")
+
+        if success:
             print("Data collection cycle completed successfully")
-            return True
         else:
             print("ERROR: Data collection cycle failed - no data retrieved")
-            return False
+
+        return success
 
     def run_continuous(self, interval_minutes=1):
         """
@@ -249,8 +382,9 @@ class HashrateMonitor:
         print(f"Starting continuous monitoring (every {interval_minutes} minute(s))")
         print("Press Ctrl+C to stop...")
 
-        # Initialize CSV file
+        # Initialize CSV files
         self.csv_manager.initialize_csv()
+        self.workers_csv_manager.initialize_workers_csv()
 
         cycle_count = 0
         success_count = 0
