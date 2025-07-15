@@ -155,7 +155,7 @@ class HashrateDataScraper:
 
         try:
             # Look for Workers section
-            workers_section = soup.find(text=re.compile(r'Workers', re.IGNORECASE))
+            workers_section = soup.find(string=re.compile(r'Workers', re.IGNORECASE))
             if not workers_section:
                 print("Workers section not found")
                 return None
@@ -327,6 +327,136 @@ class CSVManager:
             return None
 
 
+class WorkersCSVManager:
+    """
+    Handles CSV file operations for storing workers hashrate data
+    """
+
+    def __init__(self, filename="workers_hashrate_data.csv"):
+        """Initialize workers CSV manager with filename"""
+        self.filename = filename
+        self.worker_columns = set()  # Dynamic worker columns
+        print(f"Workers CSV Manager initialized with file: {filename}")
+
+    def get_worker_columns(self):
+        """Get current worker columns from existing CSV"""
+        try:
+            if os.path.exists(self.filename):
+                df = pd.read_csv(self.filename)
+                # Get all columns except id and timestamp
+                worker_cols = [col for col in df.columns if col not in ['id', 'timestamp']]
+                self.worker_columns = set(worker_cols)
+                print(f"Existing worker columns: {worker_cols}")
+                return worker_cols
+            else:
+                return []
+        except Exception as e:
+            print(f"ERROR: Failed to get worker columns: {e}")
+            return []
+
+    def initialize_workers_csv(self, initial_workers=None):
+        """Create or update workers CSV file"""
+        if not os.path.exists(self.filename):
+            print("Creating new workers CSV file...")
+            if initial_workers:
+                worker_names = [name for name in initial_workers.keys() if name != 'Total']
+                columns = ['id', 'timestamp'] + sorted(worker_names) + ['Total']
+            else:
+                columns = ['id', 'timestamp', 'Total']
+
+            df = pd.DataFrame(columns=columns)
+            df.to_csv(self.filename, index=False)
+            self.worker_columns = set(columns[2:])  # Exclude id and timestamp
+            print(f"Workers CSV created with columns: {columns}")
+        else:
+            print("Workers CSV file exists")
+            self.get_worker_columns()
+
+    def get_next_workers_id(self):
+        """Get the next ID for the workers CSV record"""
+        try:
+            if os.path.exists(self.filename):
+                df = pd.read_csv(self.filename)
+                if len(df) > 0:
+                    last_id = df['id'].max()
+                    next_id = last_id + 1
+                    print(f"Next workers ID: {next_id}")
+                    return next_id
+                else:
+                    return 0
+            else:
+                return 0
+        except Exception as e:
+            print(f"ERROR: Failed to get next workers ID: {e}")
+            return 0
+
+    def append_workers_data(self, workers_data):
+        """Append workers data to CSV"""
+        print("Appending workers data to CSV...")
+
+        if not workers_data:
+            print("No workers data to append")
+            return
+
+        # Get next ID
+        next_id = self.get_next_workers_id()
+
+        # Create timestamp
+        timestamp = datetime.datetime.now().strftime("%m/%d %H:%M:%S")
+
+        # Get current columns and new workers
+        current_workers = self.get_worker_columns()
+        new_workers = set(workers_data.keys()) - self.worker_columns
+
+        # If new workers found, update CSV structure
+        if new_workers:
+            print(f"New workers detected: {new_workers}")
+            self.add_new_worker_columns(new_workers)
+            current_workers = self.get_worker_columns()
+
+        # Create row data
+        row_data = {'id': next_id, 'timestamp': timestamp}
+
+        # Add data for all known workers
+        for worker in current_workers:
+            row_data[worker] = workers_data.get(worker, None)
+
+        print(f"Workers row data: {row_data}")
+
+        try:
+            df = pd.DataFrame([row_data])
+            df.to_csv(self.filename, mode='a', header=False, index=False)
+            print("Workers data successfully appended")
+        except Exception as e:
+            print(f"ERROR: Failed to append workers data: {e}")
+
+    def add_new_worker_columns(self, new_workers):
+        """Add new worker columns to existing CSV"""
+        try:
+            df = pd.read_csv(self.filename)
+
+            # Add new columns with None values
+            for worker in new_workers:
+                df[worker] = None
+
+            # Reorder columns: id, timestamp, sorted workers, Total at end
+            worker_cols = [col for col in df.columns if col not in ['id', 'timestamp']]
+            if 'Total' in worker_cols:
+                worker_cols.remove('Total')
+                worker_cols = sorted(worker_cols) + ['Total']
+            else:
+                worker_cols = sorted(worker_cols)
+
+            df = df[['id', 'timestamp'] + worker_cols]
+            df.to_csv(self.filename, index=False)
+
+            self.worker_columns.update(new_workers)
+            print(f"Added new worker columns: {new_workers}")
+
+        except Exception as e:
+            print(f"ERROR: Failed to add new worker columns: {e}")
+
+
 class HashrateMonitor:
     """
     Main class to coordinate scraping and data storage
@@ -435,9 +565,10 @@ def main():
     # Configuration
     url = "https://ocean.xyz/stats/bc1qf6kklyuzuq7sg9dw8duqr7uu5xhl07xvvny4dk"
     csv_filename = "hashrate_data.csv"
+    workers_csv_filename = "workers_hashrate_data.csv"
 
     # Create monitor instance
-    monitor = HashrateMonitor(url, csv_filename)
+    monitor = HashrateMonitor(url, csv_filename, workers_csv_filename)
 
     print("\nStarting continuous monitoring mode (every 1 minute)...")
     print("This will append data to CSV file with timestamp format: mm/dd hr:m:s")
