@@ -152,7 +152,7 @@ class HashrateDataScraper:
         print("Parsing workers data...")
 
         workers_data = {}
-        target_workers = ['a-q-1', 'a-q-2', 'a-ns3-1']
+        target_workers = ['a-q-1', 'a-q-2', 'a-n3s-1']
 
         try:
             # Look for table rows containing worker data
@@ -297,7 +297,7 @@ class WorkersManager:
     Manages multiple individual worker CSV files
     """
 
-    def __init__(self, target_workers=['a-q-1', 'a-q-2', 'a-ns3-1']):
+    def __init__(self, target_workers=['a-q-1', 'a-q-2', 'a-n3s-1']):
         """Initialize managers for target workers"""
         self.target_workers = target_workers
         self.worker_managers = {}
