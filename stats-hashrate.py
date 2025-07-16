@@ -236,7 +236,7 @@ class WorkerCSVManager:
         """Initialize worker CSV manager"""
         self.worker_name = worker_name
         self.filename = f"{worker_name}_hashrate_data.csv"
-        self.columns = ["id", "last_share", "status", "hashrate_60s", "hashrate_3hr", "earnings"]
+        self.columns = ["id", "last_share", "status", "60s", "3hr", "earnings"]
         print(f"Worker CSV Manager initialized for {worker_name}: {self.filename}")
 
     def initialize_csv(self):
@@ -277,8 +277,8 @@ class WorkerCSVManager:
             "id": next_id,
             "last_share": worker_data['last_share'],
             "status": worker_data['status'],
-            "hashrate_60s": worker_data['hashrate_60s'],
-            "hashrate_3hr": worker_data['hashrate_3hr'],
+            "60s": worker_data['hashrate_60s'],
+            "3hr": worker_data['hashrate_3hr'],
             "earnings": worker_data['earnings']
         }
 
@@ -333,36 +333,18 @@ class CSVManager:
     def __init__(self, filename="hashrate_data.csv"):
         """Initialize CSV manager with filename"""
         self.filename = filename
-        self.columns = ["id", "timestamp", "24_hrs", "3_hrs", "10_min", "5_min", "60_sec"]
+        self.columns = ["id", "timestamp", "24hrs", "3hrs", "10min", "5min", "60s"]
         print(f"CSV Manager initialized with file: {filename}")
 
     def initialize_csv(self):
-        """Create CSV file with headers if it doesn't exist or update existing file"""
+        """Create CSV file with headers if it doesn't exist"""
         if not os.path.exists(self.filename):
             print("Creating new CSV file with headers...")
             df = pd.DataFrame(columns=self.columns)
             df.to_csv(self.filename, index=False)
             print("CSV file created successfully")
         else:
-            print("CSV file exists, checking for id column...")
-            df = pd.read_csv(self.filename)
-
-            # Check if id column exists
-            if 'id' not in df.columns:
-                print("Adding id column to existing CSV...")
-                # Add id column starting from 0
-                df.insert(0, 'id', range(len(df)))
-                df.to_csv(self.filename, index=False)
-                print(f"Added id column to {len(df)} existing records")
-            else:
-                print("CSV file already has id column")
-
-            # Remove old normalized_timestamp column if it exists
-            if 'normalized_timestamp' in df.columns:
-                print("Removing old normalized_timestamp column...")
-                df = df.drop('normalized_timestamp', axis=1)
-                df.to_csv(self.filename, index=False)
-                print("Removed normalized_timestamp column")
+            print("CSV file exists")
 
     def get_next_id(self):
         """Get the next ID for the CSV record"""
@@ -405,11 +387,11 @@ class CSVManager:
         row_data = {
             "id": next_id,
             "timestamp": timestamp,
-            "24_hrs": hashrate_data.get("24 hrs", None),
-            "3_hrs": hashrate_data.get("3 hrs", None),
-            "10_min": hashrate_data.get("10 min", None),
-            "5_min": hashrate_data.get("5 min", None),
-            "60_sec": hashrate_data.get("60 sec", None)
+            "24hrs": hashrate_data.get("24 hrs", None),
+            "3hrs": hashrate_data.get("3 hrs", None),
+            "10min": hashrate_data.get("10 min", None),
+            "5min": hashrate_data.get("5 min", None),
+            "60s": hashrate_data.get("60 sec", None)
         }
 
         print(f"Row data to append: {row_data}")
