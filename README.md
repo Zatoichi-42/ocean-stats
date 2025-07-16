@@ -2,9 +2,12 @@
 build 89
 https://x.com/Zatoichi42  - 7/25
 
-Ocean Mining Hashrate & Worker Info parser 
-Collects & organizes data
+Ocean Mining Hashrate & Worker Info parser. 
+
+Collects & organizes data.
+
 Has been useful for finetuning infra and configs.
+
 
 Note: will need to be adjusted if website changes.
 
