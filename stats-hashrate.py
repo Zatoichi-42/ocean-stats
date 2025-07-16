@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-Hashrate Data Scraper
+Hashrate Data Scraper v89
 Scrapes hashrate data from ocean.xyz and stores in CSV format
 """
+
+VERSION = "v89"
 
 import requests
 from bs4 import BeautifulSoup
@@ -273,7 +275,7 @@ class WorkerCSVManager:
         """Initialize worker CSV manager"""
         self.worker_name = worker_name
         self.filename = f"{worker_name}_hashrate_data.csv"
-        self.columns = ["id", "last_share", "status", "60s", "3hr", "earnings", "min", "average", "mean", "max", "std"]
+        self.columns = ["id", "last_share", "status", "60s", "3hr", "earnings", "min_3hr", "avg_3hr", "max_3hr"]
         print(f"Worker CSV Manager initialized for {worker_name}: {self.filename}")
 
     def initialize_csv(self):
@@ -320,11 +322,9 @@ class WorkerCSVManager:
             "60s": worker_data['hashrate_60s'],
             "3hr": worker_data['hashrate_3hr'],
             "earnings": worker_data['earnings'],
-            "min": stats['min'],
-            "average": stats['average'],
-            "mean": stats['mean'],
-            "max": stats['max'],
-            "std": stats['std']
+            "min_3hr": stats['min_3hr'],
+            "avg_3hr": stats['avg_3hr'],
+            "max_3hr": stats['max_3hr']
         }
 
         print(f"Worker {self.worker_name} data: {row_data}")
@@ -337,40 +337,34 @@ class WorkerCSVManager:
             print(f"ERROR: Failed to append data for {self.worker_name}: {e}")
 
     def calculate_statistics(self):
-        """Calculate min, average, mean, max, std from historical 60s hashrate data"""
+        """Calculate min, avg, mean, max, std from historical 3hr hashrate data"""
         try:
             if os.path.exists(self.filename):
                 df = pd.read_csv(self.filename)
-                if len(df) > 0 and '60s' in df.columns:
+                if len(df) > 0 and '3hr' in df.columns:
                     # Get last 10 records for statistics (or all if less than 10)
-                    recent_data = df['60s'].tail(10).dropna()
+                    recent_data = df['3hr'].tail(10).dropna()
 
                     if len(recent_data) > 0:
                         return {
-                            'min': round(float(recent_data.min()), 2),
-                            'average': round(float(recent_data.mean()), 2),
-                            'mean': round(float(recent_data.mean()), 2),  # Same as average
-                            'max': round(float(recent_data.max()), 2),
-                            'std': round(float(recent_data.std()), 2) if len(recent_data) > 1 else 0.0
+                            'min_3hr': round(float(recent_data.min()), 2),
+                            'avg_3hr': round(float(recent_data.mean()), 2),
+                            'max_3hr': round(float(recent_data.max()), 2)
                         }
 
             # Default values if no historical data
             return {
-                'min': 0.0,
-                'average': 0.0,
-                'mean': 0.0,
-                'max': 0.0,
-                'std': 0.0
+                'min_3hr': 0.0,
+                'avg_3hr': 0.0,
+                'max_3hr': 0.0
             }
 
         except Exception as e:
             print(f"ERROR: Failed to calculate statistics for {self.worker_name}: {e}")
             return {
-                'min': 0.0,
-                'average': 0.0,
-                'mean': 0.0,
-                'max': 0.0,
-                'std': 0.0
+                'min_3hr': 0.0,
+                'avg_3hr': 0.0,
+                'max_3hr': 0.0
             }
 
 
@@ -415,8 +409,8 @@ class CSVManager:
     def __init__(self, filename="hashrate_data.csv"):
         """Initialize CSV manager with filename"""
         self.filename = filename
-        self.columns = ["id", "timestamp", "24hrs", "3hrs", "10min", "5min", "60s", "min", "average", "mean", "max",
-                        "std"]
+        self.columns = ["id", "timestamp", "24hrs", "3hrs", "10min", "5min", "60s", "min_10m", "avg_10m", "max_10m",
+                        "min_3hr", "avg_3hr", "max_3hr", "min_24hr", "avg_24hr", "max_24hr"]
         print(f"CSV Manager initialized with file: {filename}")
 
     def initialize_csv(self):
@@ -478,11 +472,15 @@ class CSVManager:
             "10min": hashrate_data.get("10 min", None),
             "5min": hashrate_data.get("5 min", None),
             "60s": hashrate_data.get("60 sec", None),
-            "min": stats['min'],
-            "average": stats['average'],
-            "mean": stats['mean'],
-            "max": stats['max'],
-            "std": stats['std']
+            "min_10m": stats['min_10m'],
+            "avg_10m": stats['avg_10m'],
+            "max_10m": stats['max_10m'],
+            "min_3hr": stats['min_3hr'],
+            "avg_3hr": stats['avg_3hr'],
+            "max_3hr": stats['max_3hr'],
+            "min_24hr": stats['min_24hr'],
+            "avg_24hr": stats['avg_24hr'],
+            "max_24hr": stats['max_24hr']
         }
 
         print(f"Row data to append: {row_data}")
@@ -499,40 +497,84 @@ class CSVManager:
         print(f"CSV append completed: {row_data}")
 
     def calculate_statistics(self):
-        """Calculate min, average, mean, max, std from historical 60s hashrate data"""
+        """Calculate min, avg, max statistics for 10min, 3hrs, and 24hrs from historical data"""
         try:
             if os.path.exists(self.filename):
                 df = pd.read_csv(self.filename)
-                if len(df) > 0 and '60s' in df.columns:
+                if len(df) > 0:
                     # Get last 10 records for statistics (or all if less than 10)
-                    recent_data = df['60s'].tail(10).dropna()
+                    recent_df = df.tail(10)
 
-                    if len(recent_data) > 0:
-                        return {
-                            'min': round(float(recent_data.min()), 2),
-                            'average': round(float(recent_data.mean()), 2),
-                            'mean': round(float(recent_data.mean()), 2),  # Same as average
-                            'max': round(float(recent_data.max()), 2),
-                            'std': round(float(recent_data.std()), 2) if len(recent_data) > 1 else 0.0
-                        }
+                    # Calculate stats for 10min column
+                    min_10m = avg_10m = max_10m = 0.0
+                    if '10min' in df.columns:
+                        data_10m = recent_df['10min'].dropna()
+                        if len(data_10m) > 0:
+                            min_10m = round(float(data_10m.min()), 2)
+                            avg_10m = round(float(data_10m.mean()), 2)
+                            max_10m = round(float(data_10m.max()), 2)
+
+                    # Calculate stats for 3hrs column
+                    min_3hr = avg_3hr = max_3hr = 0.0
+                    if '3hrs' in df.columns:
+                        data_3hr = recent_df['3hrs'].dropna()
+                        if len(data_3hr) > 0:
+                            min_3hr = round(float(data_3hr.min()), 2)
+                            avg_3hr = round(float(data_3hr.mean()), 2)
+                            max_3hr = round(float(data_3hr.max()), 2)
+
+                    # Calculate stats for 24hrs column
+                    min_24hr = avg_24hr = max_24hr = 0.0
+                    if '24hrs' in df.columns:
+                        data_24hr = recent_df['24hrs'].dropna()
+                        if len(data_24hr) > 0:
+                            min_24hr = round(float(data_24hr.min()), 2)
+                            avg_24hr = round(float(data_24hr.mean()), 2)
+                            max_24hr = round(float(data_24hr.max()), 2)
+
+                    # Calculate mean and std from 10min data (or use 3hrs as fallback)
+                    mean_data = recent_df['10min'].dropna() if '10min' in df.columns else recent_df[
+                        '3hrs'].dropna() if '3hrs' in df.columns else []
+                    mean_val = round(float(mean_data.mean()), 2) if len(mean_data) > 0 else 0.0
+                    std_val = round(float(mean_data.std()), 2) if len(mean_data) > 1 else 0.0
+
+                    return {
+                        'min_10m': min_10m,
+                        'avg_10m': avg_10m,
+                        'max_10m': max_10m,
+                        'min_3hr': min_3hr,
+                        'avg_3hr': avg_3hr,
+                        'max_3hr': max_3hr,
+                        'min_24hr': min_24hr,
+                        'avg_24hr': avg_24hr,
+                        'max_24hr': max_24hr
+                    }
 
             # Default values if no historical data
             return {
-                'min': 0.0,
-                'average': 0.0,
-                'mean': 0.0,
-                'max': 0.0,
-                'std': 0.0
+                'min_10m': 0.0,
+                'avg_10m': 0.0,
+                'max_10m': 0.0,
+                'min_3hr': 0.0,
+                'avg_3hr': 0.0,
+                'max_3hr': 0.0,
+                'min_24hr': 0.0,
+                'avg_24hr': 0.0,
+                'max_24hr': 0.0
             }
 
         except Exception as e:
             print(f"ERROR: Failed to calculate statistics: {e}")
             return {
-                'min': 0.0,
-                'average': 0.0,
-                'mean': 0.0,
-                'max': 0.0,
-                'std': 0.0
+                'min_10m': 0.0,
+                'avg_10m': 0.0,
+                'max_10m': 0.0,
+                'min_3hr': 0.0,
+                'avg_3hr': 0.0,
+                'max_3hr': 0.0,
+                'min_24hr': 0.0,
+                'avg_24hr': 0.0,
+                'max_24hr': 0.0
             }
 
     def get_latest_data(self, n=5):
@@ -647,7 +689,7 @@ class HashrateMonitor:
 
 def main():
     """Main function to run the hashrate monitor"""
-    print("Hashrate Data Scraper Starting...")
+    print(f"Hashrate Data Scraper {VERSION}")
     print("=" * 50)
 
     # Load configuration
