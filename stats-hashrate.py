@@ -20,6 +20,43 @@ from webdriver_manager.chrome import ChromeDriverManager
 import re
 
 
+def load_config():
+    """Load configuration from config.txt"""
+    if not os.path.exists("config.txt"):
+        print("config.txt needed - see github for description")
+        sys.exit(1)
+
+    bitcoin_address = None
+    worker_names = []
+    refresh_interval = 1
+
+    try:
+        with open("config.txt", 'r') as f:
+            lines = f.readlines()
+
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip()
+
+                    if key == 'bitcoin_address':
+                        bitcoin_address = value
+                    elif key == 'worker_name':
+                        if value:  # Only add non-empty worker names
+                            worker_names.append(value)
+                    elif key == 'refresh':
+                        refresh_interval = int(value)
+
+        return bitcoin_address, worker_names, refresh_interval
+
+    except Exception as e:
+        print(f"Error reading config.txt: {e}")
+        sys.exit(1)
+
+
 class HashrateDataScraper:
     """
     Web scraper class to fetch hashrate data from ocean.xyz
@@ -51,7 +88,7 @@ class HashrateDataScraper:
             print(f"Error setting up driver: {e}")
             return False
 
-    def fetch_data(self):
+    def fetch_data(self, target_workers):
         """
         Fetch hashrate data from the website
         Returns tuple (hashrate_data, workers_data) or (None, None) if failed
@@ -83,7 +120,7 @@ class HashrateDataScraper:
 
             # Find the hashrate table and workers data
             hashrate_data = self.parse_hashrate_table(soup)
-            workers_data = self.parse_workers_data(soup)
+            workers_data = self.parse_workers_data(soup, target_workers)
 
             if hashrate_data:
                 print("Hashrate data fetched successfully")
@@ -144,15 +181,15 @@ class HashrateDataScraper:
             print(f"ERROR: Exception type: {type(e).__name__}")
             return None
 
-    def parse_workers_data(self, soup):
+    def parse_workers_data(self, soup, target_workers):
         """
         Parse workers data from HTML soup
         Returns dictionary with worker names as keys and their data as values
         """
         print("Parsing workers data...")
+        print(f"Target workers: {target_workers}")
 
         workers_data = {}
-        target_workers = ['a-q-1', 'a-q-2', 'a-n3s-1']
 
         try:
             # Look for table rows containing worker data
@@ -297,7 +334,7 @@ class WorkersManager:
     Manages multiple individual worker CSV files
     """
 
-    def __init__(self, target_workers=['a-q-1', 'a-q-2', 'a-n3s-1']):
+    def __init__(self, target_workers):
         """Initialize managers for target workers"""
         self.target_workers = target_workers
         self.worker_managers = {}
@@ -422,12 +459,12 @@ class HashrateMonitor:
     Main class to coordinate scraping and data storage
     """
 
-    def __init__(self, url, csv_filename="hashrate_data.csv"):
+    def __init__(self, url, worker_names, csv_filename="hashrate_data.csv"):
         """Initialize monitor with URL and CSV filename"""
         self.url = url
         self.scraper = HashrateDataScraper(url)
         self.csv_manager = CSVManager(csv_filename)
-        self.workers_manager = WorkersManager()
+        self.workers_manager = WorkersManager(worker_names)
         print("Hashrate Monitor initialized")
 
     def run_once(self):
@@ -437,7 +474,7 @@ class HashrateMonitor:
         print("=" * 50)
 
         # Fetch data from website
-        hashrate_data, workers_data = self.scraper.fetch_data()
+        hashrate_data, workers_data = self.scraper.fetch_data(self.workers_manager.target_workers)
 
         success = False
 
@@ -522,19 +559,28 @@ def main():
     print("Hashrate Data Scraper Starting...")
     print("=" * 50)
 
-    # Configuration
-    url = "https://ocean.xyz/stats/bc1qf6kklyuzuq7sg9dw8duqr7uu5xhl07xvvny4dk"
-    csv_filename = "hashrate_data.csv"
+    # Load configuration
+    bitcoin_address, worker_names, refresh_interval = load_config()
+
+    if not bitcoin_address:
+        print("ERROR: No bitcoin address in config.txt")
+        sys.exit(1)
+
+    # Build URL
+    url = f"https://ocean.xyz/stats/{bitcoin_address}"
+
+    print(f"Worker names: {worker_names}")
+    print(f"Refresh interval: {refresh_interval} minutes")
 
     # Create monitor instance
-    monitor = HashrateMonitor(url, csv_filename)
+    monitor = HashrateMonitor(url, worker_names)
 
-    print("\nStarting continuous monitoring mode (every 1 minute)...")
-    print("This will append data to CSV file with timestamp format: mm/dd hr:m:s")
+    print("\nStarting continuous monitoring mode...")
+    print("This will append data to CSV files with timestamp format: mm/dd hr:m:s")
     print("=" * 50)
 
     try:
-        monitor.run_continuous(interval_minutes=1)
+        monitor.run_continuous(interval_minutes=refresh_interval)
     except KeyboardInterrupt:
         print("\nExiting...")
     finally:
