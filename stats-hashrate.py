@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Hashrate Data Scraper
-Scrapes hashrate data from ocean.xyz and stores in CSV format
+Scrapes hashrate data from ocean.xyz and stores in CSV format.
 """
 
 import requests
