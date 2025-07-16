@@ -1,11 +1,11 @@
 # Ocean.xyz Stats Configuration File
 # https://ocean.xyz/stats/$bitcoin_address
-bitcoin_address=bc1qf6kklyuzuq7sg9dw8duqr7uu5xhl07xvvny4dk
+bitcoin_address=btc_payout_address
 
 # Worker names: one line per worker, as many as you want... usually bitcoin_address:worker_name
-worker_name=a-q-1
-worker_name=a-q-2
-worker_name=a-n3s-1
+worker_name=worker1
+worker_name=worker2
+worker_name=worker3
 
 
 # Refresh interval in minutes
